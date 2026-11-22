@@ -15,16 +15,8 @@ fn main() -> eframe::Result {
         .with_inner_size([1280.0, 860.0])
         .with_min_inner_size([900.0, 600.0])
         .with_drag_and_drop(true);
-    // On macOS the icon comes from the app bundle (`assets/icon.icns`).
-    #[cfg(not(target_os = "macos"))]
-    let viewport = viewport.with_icon(eframe::egui::IconData {
-        // 128×128 RGBA pixels, made from `assets/icon.svg`.
-        rgba: include_bytes!("../assets/icon-128.rgba").to_vec(),
-        width: 128,
-        height: 128,
-    });
     let options = eframe::NativeOptions {
-        viewport,
+        viewport: viewport.with_icon(app_icon()),
         ..Default::default()
     };
     eframe::run_native(
@@ -32,4 +24,20 @@ fn main() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(app::ShootingSortApp::new(cc)))),
     )
+}
+
+/// Window and Dock icon. Without one, eframe shows its own egui icon, even inside a macOS app bundle.
+fn app_icon() -> eframe::egui::IconData {
+    // Inside "Shooting Sort.app", an empty icon lets macOS use the sharper `icon.icns` of the bundle.
+    if cfg!(target_os = "macos")
+        && std::env::current_exe().is_ok_and(|exe| exe.to_string_lossy().contains(".app/Contents/MacOS/"))
+    {
+        return eframe::egui::IconData::default();
+    }
+    eframe::egui::IconData {
+        // 128×128 RGBA pixels, made from `assets/icon.svg`.
+        rgba: include_bytes!("../assets/icon-128.rgba").to_vec(),
+        width: 128,
+        height: 128,
+    }
 }
