@@ -1,0 +1,176 @@
+//! Colours, text styles and hand-drawn icons from the Shooting Sort visual identity.
+
+use eframe::egui::{
+    self, Color32, CornerRadius, FontFamily, FontId, Painter, Pos2, Rect, Stroke, TextStyle, pos2,
+    vec2,
+};
+use eframe::epaint::CubicBezierShape;
+
+pub const CHARCOAL: Color32 = Color32::from_rgb(0x17, 0x19, 0x1C);
+pub const GRAPHITE: Color32 = Color32::from_rgb(0x2B, 0x2E, 0x33);
+pub const IVORY: Color32 = Color32::from_rgb(0xF3, 0xF1, 0xEB);
+pub const BLUE: Color32 = Color32::from_rgb(0x7E, 0xA8, 0xFF);
+
+/// Slightly lighter than charcoal, for panels sitting on the window background.
+pub const SURFACE: Color32 = Color32::from_rgb(0x1E, 0x20, 0x24);
+pub const BORDER: Color32 = Color32::from_rgb(0x33, 0x36, 0x3C);
+pub const GRAPHITE_HOVER: Color32 = Color32::from_rgb(0x36, 0x3A, 0x40);
+pub const TEXT_MUTED: Color32 = Color32::from_rgb(0xA3, 0xA2, 0x9D);
+pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x6C, 0x6D, 0x6E);
+/// Status colours: not part of the brand palette, used only for decisions.
+pub const KEEP: Color32 = Color32::from_rgb(0x8C, 0xCF, 0x9F);
+pub const REMOVE: Color32 = Color32::from_rgb(0xE8, 0x7D, 0x6E);
+
+pub const RADIUS: u8 = 10;
+
+pub fn apply(ctx: &egui::Context) {
+    ctx.set_visuals(egui::Visuals::dark());
+    ctx.global_style_mut(|style| {
+        style.text_styles = [
+            (TextStyle::Small, FontId::new(11.0, FontFamily::Proportional)),
+            (TextStyle::Body, FontId::new(14.0, FontFamily::Proportional)),
+            (TextStyle::Button, FontId::new(14.0, FontFamily::Proportional)),
+            (TextStyle::Heading, FontId::new(22.0, FontFamily::Proportional)),
+            (TextStyle::Monospace, FontId::new(12.0, FontFamily::Monospace)),
+        ]
+        .into();
+
+        let v = &mut style.visuals;
+        v.panel_fill = CHARCOAL;
+        v.window_fill = SURFACE;
+        v.window_stroke = Stroke::new(1.0, BORDER);
+        v.window_corner_radius = CornerRadius::same(RADIUS + 2);
+        v.extreme_bg_color = CHARCOAL;
+        v.override_text_color = Some(IVORY);
+        v.selection.bg_fill = BLUE;
+        v.selection.stroke = Stroke::new(1.0, CHARCOAL);
+        v.widgets.noninteractive.bg_stroke = Stroke::new(1.0, BORDER);
+        for w in [
+            &mut v.widgets.inactive,
+            &mut v.widgets.hovered,
+            &mut v.widgets.active,
+        ] {
+            w.corner_radius = CornerRadius::same(8);
+            w.fg_stroke = Stroke::new(1.0, IVORY);
+            w.bg_stroke = Stroke::NONE;
+        }
+        v.widgets.inactive.weak_bg_fill = GRAPHITE;
+        v.widgets.inactive.bg_fill = GRAPHITE;
+        v.widgets.hovered.weak_bg_fill = GRAPHITE_HOVER;
+        v.widgets.hovered.bg_fill = GRAPHITE_HOVER;
+        v.widgets.active.weak_bg_fill = BORDER;
+        v.widgets.active.bg_fill = BORDER;
+
+        style.spacing.button_padding = vec2(16.0, 8.0);
+        style.spacing.item_spacing = vec2(10.0, 8.0);
+    });
+}
+
+/// The double-S monogram, drawn from the `shooting-sort-mark.svg` paths (100×100 view box).
+pub fn paint_logo(painter: &Painter, rect: Rect) {
+    let scale = rect.width().min(rect.height()) / 100.0;
+    let origin = rect.center() - vec2(50.0, 50.0) * scale;
+    let at = |x: f32, y: f32, dx: f32, dy: f32| origin + vec2(x + dx, y + dy) * scale;
+    let stroke = Stroke::new(9.0 * scale, IVORY);
+
+    for (dx, dy) in [(0.0, 0.0), (39.0, 11.0)] {
+        let curves = [
+            [(45.0, 30.0), (39.0, 23.0), (21.0, 22.0), (19.0, 34.0)],
+            [(19.0, 34.0), (17.0, 46.0), (45.0, 40.0), (45.0, 54.0)],
+            [(45.0, 54.0), (45.0, 67.0), (24.0, 69.0), (16.0, 61.0)],
+        ];
+        for c in curves {
+            painter.add(CubicBezierShape::from_points_stroke(
+                c.map(|(x, y)| at(x, y, dx, dy)),
+                false,
+                Color32::TRANSPARENT,
+                stroke,
+            ));
+        }
+    }
+    // The blue index mark at the start of the first S.
+    painter.add(CubicBezierShape::from_points_stroke(
+        [
+            at(45.0, 30.0, 0.0, 0.0),
+            at(44.1, 28.95, 0.0, 0.0),
+            at(42.93, 28.03, 0.0, 0.0),
+            at(41.59, 27.27, 0.0, 0.0),
+        ],
+        false,
+        Color32::TRANSPARENT,
+        Stroke::new(9.0 * scale, BLUE),
+    ));
+}
+
+#[derive(Clone, Copy)]
+pub enum Icon {
+    Photos,
+    Unsorted,
+    Keep,
+    Remove,
+}
+
+/// Small line icons, drawn in a square `rect`.
+pub fn paint_icon(painter: &Painter, rect: Rect, icon: Icon, color: Color32) {
+    let s = rect.width();
+    let p = |x: f32, y: f32| -> Pos2 { rect.min + vec2(x, y) * s };
+    let stroke = Stroke::new(1.6, color);
+    let frame = Rect::from_min_max(p(0.1, 0.12), p(0.9, 0.88));
+
+    match icon {
+        Icon::Photos => {
+            painter.rect_stroke(frame, 3.0, stroke, egui::StrokeKind::Inside);
+            painter.line(vec![p(0.18, 0.78), p(0.42, 0.5), p(0.58, 0.66), p(0.68, 0.56), p(0.82, 0.72)], stroke);
+            painter.circle_filled(p(0.66, 0.34), s * 0.07, color);
+        }
+        Icon::Unsorted => {
+            painter.circle_stroke(rect.center(), s * 0.38, stroke);
+            painter.line_segment([p(0.5, 0.3), p(0.5, 0.52)], stroke);
+            painter.line_segment([p(0.5, 0.52), p(0.64, 0.62)], stroke);
+        }
+        Icon::Keep => {
+            painter.rect_stroke(frame, 3.0, stroke, egui::StrokeKind::Inside);
+            painter.line(vec![p(0.3, 0.5), p(0.45, 0.65), p(0.72, 0.36)], stroke);
+        }
+        Icon::Remove => paint_trash(painter, rect, stroke),
+    }
+}
+
+fn paint_trash(painter: &Painter, rect: Rect, stroke: Stroke) {
+    let s = rect.width();
+    let p = |x: f32, y: f32| -> Pos2 { rect.min + vec2(x, y) * s };
+    painter.line_segment([p(0.14, 0.24), p(0.86, 0.24)], stroke);
+    painter.line(vec![p(0.38, 0.24), p(0.38, 0.12), p(0.62, 0.12), p(0.62, 0.24)], stroke);
+    painter.line(vec![p(0.22, 0.24), p(0.27, 0.9), p(0.73, 0.9), p(0.78, 0.24)], stroke);
+    painter.line_segment([p(0.42, 0.4), p(0.42, 0.74)], stroke);
+    painter.line_segment([p(0.58, 0.4), p(0.58, 0.74)], stroke);
+}
+
+/// A round status badge with a check (keep) or a cross (remove).
+pub fn paint_decision_badge(painter: &Painter, center: Pos2, radius: f32, keep: bool) {
+    let fill = if keep { KEEP } else { REMOVE };
+    painter.circle(center, radius, fill, Stroke::new(1.5, CHARCOAL));
+    let stroke = Stroke::new(radius * 0.22, CHARCOAL);
+    let r = radius * 0.42;
+    if keep {
+        painter.line(
+            vec![
+                center + vec2(-r, 0.0),
+                center + vec2(-r * 0.25, r * 0.7),
+                center + vec2(r, -r * 0.6),
+            ],
+            stroke,
+        );
+    } else {
+        painter.line_segment([center + vec2(-r, -r), center + vec2(r, r)], stroke);
+        painter.line_segment([center + vec2(-r, r), center + vec2(r, -r)], stroke);
+    }
+}
+
+/// Fits an image of `size` inside `bounds`, keeping its aspect ratio, centred.
+pub fn fit(size: egui::Vec2, bounds: Rect) -> Rect {
+    let scale = (bounds.width() / size.x).min(bounds.height() / size.y);
+    Rect::from_center_size(bounds.center(), size * scale)
+}
+
+pub const FULL_UV: Rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
