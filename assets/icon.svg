@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Shooting Sort">
+  <!-- App icon: the double-S mark on a charcoal rounded square (macOS icon grid: 824 px body). -->
+  <defs>
+    <path id="letter-s" d="M45 30 C39 23 21 22 19 34 C17 46 45 40 45 54 C45 67 24 69 16 61"/>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="185" fill="#17191C"/>
+  <rect x="101.5" y="101.5" width="821" height="821" rx="183.5" fill="none" stroke="#2B2E33" stroke-width="3"/>
+  <g transform="translate(512 512) scale(6.4) translate(-51 -52)">
+    <g fill="none" stroke="#F3F1EB" stroke-width="9" stroke-linecap="butt">
+      <use href="#letter-s"/>
+      <use href="#letter-s" transform="translate(39 11)"/>
+    </g>
+    <path d="M45 30 C44.1 28.95 42.93 28.03 41.59 27.27" fill="none" stroke="#7EA8FF" stroke-width="9" stroke-linecap="butt"/>
+  </g>
+</svg>

@@ -2,7 +2,7 @@
 
 Desktop app to cull a day of shooting: review the JPEGs, mark each photo Keep or To Remove, then move the RAW and JPEG files into separate folders.
 
-Rust, egui, eframe on wgpu. The app is in early development. It runs on macOS. The code has no macOS-specific parts, so Linux and Windows are candidates, but they are not tested yet.
+Rust, egui, eframe on wgpu. The app is in early development. It is tested on macOS. Builds for Windows and Linux are available, but they are not tested yet.
 
 ## Features
 
@@ -27,18 +27,43 @@ The extensions are not case-sensitive. The preview of a RAW-only photo comes fro
 ## Limitations
 
 - The app does not move XMP sidecar files. A sidecar stays in the shoot folder.
-- There is no `.app` bundle or installer yet. You build the app yourself.
+- The builds are not signed. macOS and Windows show a warning the first time you open the app: see [Install](#install).
 - For a RAW-only photo, the zoom shows the embedded preview, not the RAW data. On many cameras this preview is small (about 1600 pixels wide on the Sony A7R IV).
 - The full-size image is limited to the largest texture of the graphics card (often 8192 or 16384 pixels). A larger photo is shown slightly below its real 100 %.
 
 ## Requirements
 
-- macOS. Linux and Windows are not tested.
-- Rust 1.95 or newer, to build the app. egui 0.37 needs this version.
+- macOS 11 or newer, on Apple Silicon or Intel.
+- Windows 10 or newer, 64-bit. Not tested yet.
+- Linux, x86-64, with Wayland or X11 and a graphics driver with Vulkan or OpenGL. Not tested yet.
+- Rust 1.95 or newer, only to build the app yourself. egui 0.37 needs this version.
 
 ## Install
 
-Build the release binary:
+Download the file for your system from the [latest release](https://github.com/alexischarp/shooting-sort/releases/latest).
+
+### macOS
+
+1. Open `Shooting-Sort-<version>-macos.dmg` and drag "Shooting Sort" to "Applications".
+2. Open the app. macOS shows that it cannot verify the developer, because the app is not signed. Click "Done".
+3. Open System Settings → Privacy & Security. Below "Security", click "Open Anyway" for Shooting Sort, then confirm.
+
+You do this one time for each new version. As an alternative, remove the quarantine flag in the Terminal:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Shooting Sort.app"
+```
+
+### Windows
+
+1. Extract `Shooting-Sort-<version>-windows-x86_64.zip`.
+2. Open `Shooting Sort.exe`. If Windows SmartScreen shows "Windows protected your PC", click "More info", then "Run anyway".
+
+### Linux
+
+Extract `Shooting-Sort-<version>-linux-x86_64.tar.gz` and run `shooting-sort`. The folder picker uses the desktop's file dialog, through the XDG desktop portal.
+
+### Build from source
 
 ```bash
 cargo build --release
@@ -119,6 +144,8 @@ The code is in `src/`:
 | `theme.rs` | Colours, logo and icons |
 | `app.rs` | User interface |
 
+The app icon is `assets/icon.svg`. The files `assets/icon.icns` (macOS bundle), `assets/icon.png` and `assets/icon-128.rgba` (window icon on Windows and Linux) come from it. The macOS bundle files are in `packaging/macos/`.
+
 ## Development
 
 Run the app in debug mode:
@@ -139,6 +166,33 @@ Run the linter:
 
 ```bash
 cargo clippy
+```
+
+## Release
+
+The workflow `.github/workflows/release.yml` builds the macOS, Windows and Linux files, and publishes them as a GitHub release.
+
+1. Set the new version in `Cargo.toml`, then run `cargo build` to update `Cargo.lock`. Commit the two files.
+2. Tag the commit with the same version, prefixed with `v`, and push the tag:
+
+   ```bash
+   git tag v0.2.0
+   ```
+
+   ```bash
+   git push origin v0.2.0
+   ```
+
+The workflow stops if the tag and the version in `Cargo.toml` are different. To test the builds without a release, run the workflow by hand from the Actions tab. The files are then in the workflow artifacts.
+
+To make the macOS app on your computer (Apple Silicon only):
+
+```bash
+cargo build --release
+```
+
+```bash
+packaging/macos/bundle.sh target/release/shooting-sort 0.1.0 dist
 ```
 
 ## Contributing

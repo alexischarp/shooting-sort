@@ -10,3 +10,4 @@ target
 rustc-ice-*.txt
 
 .DS_Store
+/dist
