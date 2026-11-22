@@ -10,6 +10,7 @@ Rust, egui, eframe on wgpu. The app is in early development. It runs on macOS. T
 - Shows one photo for each RAW + JPEG pair with the same base name, for example `DSC04218.ARW` and `DSC04218.JPG`. The app shows the JPEG, because it loads faster.
 - Shows the formats of each photo: `RAW + JPEG`, `JPEG only` or `RAW only`. For a RAW-only photo, the app shows the preview that the camera embeds in the RAW file.
 - Marks each photo Keep or To Remove, with buttons or with the keyboard. Each marked photo shows a badge in the filmstrip.
+- Zooms to 100 % to check the focus, and up to 400 %. The zoom stays when you go to the next photo, so you can compare the photos of a burst at the same place.
 - Filters the list: All Photos, Unsorted, Keep, To Remove. The sidebar shows the progress.
 - Saves the marks in the shoot folder. When you open the folder again, the app restores the marks and goes to the first unsorted photo.
 - Moves the files when you click "Sort Files". It never deletes a file and never overwrites a file.
@@ -27,7 +28,8 @@ The extensions are not case-sensitive. The preview of a RAW-only photo comes fro
 
 - The app does not move XMP sidecar files. A sidecar stays in the shoot folder.
 - There is no `.app` bundle or installer yet. You build the app yourself.
-- The app shows the photo to fit the window. It has no zoom.
+- For a RAW-only photo, the zoom shows the embedded preview, not the RAW data. On many cameras this preview is small (about 1600 pixels wide on the Sony A7R IV).
+- The full-size image is limited to the largest texture of the graphics card (often 8192 or 16384 pixels). A larger photo is shown slightly below its real 100 %.
 
 ## Requirements
 
@@ -65,9 +67,20 @@ The shortcuts are:
 | `K` | Keep |
 | `X` | To Remove |
 | `U` | Clear the mark |
+| `Z` | Zoom to 100 %, or back to fit |
+| `+` / `-` | Zoom in / out |
+| `Esc` | Back to fit |
 | `⌘O` | Open a folder |
 
 To clear a mark with the mouse, click the active Keep or To Remove button again.
+
+To zoom with the mouse or the trackpad:
+
+- Double-click the photo to zoom to 100 % at that point. Double-click again to go back to fit.
+- Pinch on the trackpad, or scroll with `⌘` held, to zoom at the pointer.
+- When the photo is zoomed, drag it or scroll to move it.
+
+The label at the bottom left of the photo shows the zoom level.
 
 ## How it works
 
@@ -92,6 +105,8 @@ The marks are in `.shooting-sort.json`, in the shoot folder. The app writes this
 
 A pool of background threads decodes the images. The photo on screen and the photos next to it have priority. Filmstrip thumbnails load when they come into view.
 
+The main view shows a preview of 2560 pixels at most. When you zoom, the app also decodes the full-size JPEG of the current photo and of the next photo. It shows the full-size image only when the preview does not have sufficient pixels for the zoom level.
+
 The code is in `src/`:
 
 | File | Contents |
@@ -100,6 +115,7 @@ The code is in `src/`:
 | `session.rs` | Read and write `.shooting-sort.json` |
 | `sorter.rs` | File moves |
 | `loader.rs` | Background image decoding |
+| `zoom.rs` | Zoom and pan calculations |
 | `theme.rs` | Colours, logo and icons |
 | `app.rs` | User interface |
 
@@ -117,7 +133,7 @@ Run the unit tests:
 cargo test
 ```
 
-The unit tests cover the file destinations and the sort on real files in a temporary folder. The user interface and the RAW previews need a manual test with a real shoot folder.
+The unit tests cover the file destinations, the sort on real files in a temporary folder, and the zoom and pan calculations. The user interface and the RAW previews need a manual test with a real shoot folder.
 
 Run the linter:
 
@@ -129,7 +145,7 @@ cargo clippy
 
 Issues and pull requests are welcome.
 
-- Run the unit tests and `cargo clippy`. Test the app with a real shoot folder when you modify the scan, the loader or the sort.
+- Run the unit tests and `cargo clippy`. Test the app with a real shoot folder when you modify the scan, the loader, the zoom or the sort.
 - Write commit messages in the Conventional Commits format (`feat:`, `fix:`, `docs:`).
 - Reports about RAW formats that do not show a preview are welcome. Give the camera model and the file extension.
 

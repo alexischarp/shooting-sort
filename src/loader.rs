@@ -1,7 +1,8 @@
 //! Decodes photos on background threads so the UI never waits on disk or JPEG decoding.
 //!
-//! Large previews (for the main view) take priority over filmstrip thumbnails.
-//! Every decode produces a thumbnail, so loading a preview also fills the filmstrip.
+//! Large images (full size for zoom, then previews for the main view) take priority over
+//! filmstrip thumbnails. Every decode also produces a thumbnail, so loading a large image
+//! fills the filmstrip too.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -13,33 +14,49 @@ use image::metadata::Orientation;
 use image::{DynamicImage, ImageDecoder, ImageReader};
 
 /// Longest side of the main view image, in pixels. Large enough for a Retina display.
-const PREVIEW_MAX: u32 = 2560;
+pub const PREVIEW_MAX: u32 = 2560;
 /// Longest side of filmstrip thumbnails, in pixels.
 const THUMB_MAX: u32 = 320;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Size {
+    Thumb,
+    Preview,
+    /// The full resolution, limited to `max_side` (the GPU's largest texture).
+    Full { max_side: u32 },
+}
+
+pub struct Request {
+    pub index: usize,
+    pub path: PathBuf,
+    pub size: Size,
+}
+
 struct Job {
     generation: u64,
-    index: usize,
-    path: PathBuf,
-    want_preview: bool,
+    request: Request,
 }
 
 pub struct Loaded {
     pub generation: u64,
     pub index: usize,
+    pub size: Size,
     pub result: Result<Images, String>,
 }
 
 pub struct Images {
+    /// Pixel size of the decoded image, after rotation, before any downscaling.
+    pub original_size: [u32; 2],
     pub thumb: ColorImage,
-    pub preview: Option<ColorImage>,
+    /// The preview or full-size image, when one was requested.
+    pub large: Option<ColorImage>,
 }
 
 #[derive(Default)]
 struct Queues {
     generation: u64,
     /// Most important first.
-    previews: VecDeque<Job>,
+    large: VecDeque<Job>,
     thumbs: VecDeque<Job>,
 }
 
@@ -79,7 +96,7 @@ impl Loader {
     pub fn reset(&self, generation: u64) {
         let mut q = self.shared.queues.lock().unwrap();
         q.generation = generation;
-        q.previews.clear();
+        q.large.clear();
         q.thumbs.clear();
     }
 
@@ -88,26 +105,23 @@ impl Loader {
         let generation = q.generation;
         q.thumbs.push_back(Job {
             generation,
-            index,
-            path: path.to_owned(),
-            want_preview: false,
+            request: Request {
+                index,
+                path: path.to_owned(),
+                size: Size::Thumb,
+            },
         });
         self.shared.wake.notify_one();
     }
 
-    /// Replaces the pending preview requests, most important first.
+    /// Replaces the pending preview and full-size requests, most important first.
     /// Requests that are no longer wanted (the user moved on) are dropped.
-    pub fn set_previews(&self, wanted: Vec<(usize, PathBuf)>) {
+    pub fn set_large(&self, wanted: Vec<Request>) {
         let mut q = self.shared.queues.lock().unwrap();
         let generation = q.generation;
-        q.previews = wanted
+        q.large = wanted
             .into_iter()
-            .map(|(index, path)| Job {
-                generation,
-                index,
-                path,
-                want_preview: true,
-            })
+            .map(|request| Job { generation, request })
             .collect();
         self.shared.wake.notify_all();
     }
@@ -122,17 +136,18 @@ fn worker(shared: &Shared, tx: &Sender<Loaded>, ctx: &egui::Context) {
         let job = {
             let mut q = shared.queues.lock().unwrap();
             loop {
-                if let Some(job) = q.previews.pop_front().or_else(|| q.thumbs.pop_front()) {
+                if let Some(job) = q.large.pop_front().or_else(|| q.thumbs.pop_front()) {
                     break job;
                 }
                 q = shared.wake.wait(q).unwrap();
             }
         };
-        let result = decode(&job.path, job.want_preview);
+        let Request { index, path, size } = job.request;
         let loaded = Loaded {
             generation: job.generation,
-            index: job.index,
-            result,
+            index,
+            size,
+            result: decode(&path, size),
         };
         if tx.send(loaded).is_err() {
             return; // The app is closing.
@@ -147,19 +162,42 @@ fn is_jpeg(path: &Path) -> bool {
         .is_some_and(|e| e.eq_ignore_ascii_case("jpg") || e.eq_ignore_ascii_case("jpeg"))
 }
 
-fn decode(path: &Path, want_preview: bool) -> Result<Images, String> {
+fn decode(path: &Path, size: Size) -> Result<Images, String> {
     let (image, orientation) = if is_jpeg(path) {
         decode_jpeg(path)
     } else {
         decode_raw_preview(path)
     }?;
 
-    let preview = shrink(image, PREVIEW_MAX);
-    let thumb = shrink(preview.clone(), THUMB_MAX);
+    let (w, h) = (image.width(), image.height());
+    let original_size = if swaps_sides(orientation) { [h, w] } else { [w, h] };
+
+    let (thumb, large) = match size {
+        Size::Thumb => (shrink(image, THUMB_MAX), None),
+        Size::Preview => {
+            let preview = shrink(image, PREVIEW_MAX);
+            (shrink(preview.clone(), THUMB_MAX), Some(preview))
+        }
+        Size::Full { max_side } => {
+            let thumb = image.thumbnail(THUMB_MAX, THUMB_MAX);
+            (thumb, Some(shrink(image, max_side)))
+        }
+    };
     Ok(Images {
+        original_size,
         thumb: to_color_image(thumb, orientation),
-        preview: want_preview.then(|| to_color_image(preview, orientation)),
+        large: large.map(|image| to_color_image(image, orientation)),
     })
+}
+
+fn swaps_sides(orientation: Orientation) -> bool {
+    matches!(
+        orientation,
+        Orientation::Rotate90
+            | Orientation::Rotate270
+            | Orientation::Rotate90FlipH
+            | Orientation::Rotate270FlipH
+    )
 }
 
 fn decode_jpeg(path: &Path) -> Result<(DynamicImage, Orientation), String> {
@@ -175,6 +213,7 @@ fn decode_jpeg(path: &Path) -> Result<(DynamicImage, Orientation), String> {
 }
 
 /// Reads the JPEG preview that cameras embed in RAW files, instead of developing the RAW.
+/// This preview is also the largest image available for a RAW-only photo.
 fn decode_raw_preview(path: &Path) -> Result<(DynamicImage, Orientation), String> {
     let source = rawler::rawsource::RawSource::new(path).map_err(|e| e.to_string())?;
     let decoder = rawler::get_decoder(&source).map_err(|e| e.to_string())?;

@@ -7,10 +7,11 @@ use eframe::egui::{
 };
 
 use crate::library::{self, Decision, Photo};
-use crate::loader::Loader;
+use crate::loader::{Loader, Request, Size};
 use crate::session;
 use crate::sorter::{self, SortReport};
 use crate::theme::{self, Icon};
+use crate::zoom::{self, Zoom};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Filter {
@@ -30,6 +31,11 @@ impl Filter {
         }
     }
 }
+
+/// Largest zoom, relative to 100 % (one photo pixel per screen pixel).
+const MAX_ZOOM: f32 = 4.0;
+/// Zoom step for the `+` and `-` keys.
+const ZOOM_STEP: f32 = 1.5;
 
 enum Dialog {
     ConfirmSort,
@@ -51,7 +57,15 @@ pub struct ShootingSortApp {
     previews: HashMap<usize, TextureHandle>,
     /// Photos whose preview is wanted (current and neighbours); others are evicted.
     previews_wanted: Vec<usize>,
-    previews_requested_for: Option<usize>,
+    /// Full-resolution images, only while zoomed (current and next photo).
+    fulls: HashMap<usize, TextureHandle>,
+    fulls_wanted: Vec<usize>,
+    /// The (current photo, zoomed) state the preview and full-size requests were made for.
+    large_requested_for: Option<(Option<usize>, bool)>,
+    /// Pixel size of each photo's largest image, used to compute 100 %.
+    original_sizes: HashMap<usize, [u32; 2]>,
+    zoom: Option<Zoom>,
+    max_texture_side: u32,
     load_errors: HashMap<usize, String>,
     scroll_filmstrip: bool,
     dialog: Option<Dialog>,
@@ -72,7 +86,12 @@ impl ShootingSortApp {
             thumbs_requested: HashSet::new(),
             previews: HashMap::new(),
             previews_wanted: Vec::new(),
-            previews_requested_for: None,
+            fulls: HashMap::new(),
+            fulls_wanted: Vec::new(),
+            large_requested_for: None,
+            original_sizes: HashMap::new(),
+            zoom: None,
+            max_texture_side: 4096,
             load_errors: HashMap::new(),
             scroll_filmstrip: false,
             dialog: None,
@@ -114,7 +133,11 @@ impl ShootingSortApp {
         self.thumbs_requested.clear();
         self.previews.clear();
         self.previews_wanted.clear();
-        self.previews_requested_for = None;
+        self.fulls.clear();
+        self.fulls_wanted.clear();
+        self.large_requested_for = None;
+        self.original_sizes.clear();
+        self.zoom = None;
         self.load_errors.clear();
         self.save_error = None;
         self.filter = Filter::All;
@@ -207,16 +230,28 @@ impl ShootingSortApp {
             let i = loaded.index;
             match loaded.result {
                 Ok(images) => {
+                    let known = self.original_sizes.entry(i).or_insert(images.original_size);
+                    if images.original_size[0] > known[0] {
+                        *known = images.original_size;
+                    }
                     self.thumbs.entry(i).or_insert_with(|| {
                         ctx.load_texture(format!("thumb-{i}"), images.thumb, TextureOptions::LINEAR)
                     });
-                    if let Some(preview) = images.preview
-                        && self.previews_wanted.contains(&i)
-                    {
-                        self.previews.insert(
-                            i,
-                            ctx.load_texture(format!("preview-{i}"), preview, preview_options),
-                        );
+                    match (loaded.size, images.large) {
+                        (Size::Preview, Some(preview)) if self.previews_wanted.contains(&i) => {
+                            self.previews.insert(
+                                i,
+                                ctx.load_texture(format!("preview-{i}"), preview, preview_options),
+                            );
+                        }
+                        (Size::Full { .. }, Some(full)) if self.fulls_wanted.contains(&i) => {
+                            // Full-size images are shown at 100 % or more: no mipmaps needed.
+                            self.fulls.insert(
+                                i,
+                                ctx.load_texture(format!("full-{i}"), full, TextureOptions::LINEAR),
+                            );
+                        }
+                        _ => {}
                     }
                 }
                 Err(e) => {
@@ -226,33 +261,69 @@ impl ShootingSortApp {
         }
     }
 
-    /// Keeps the current photo and its neighbours decoded at full size.
-    fn update_preview_requests(&mut self) {
-        if self.previews_requested_for == self.current {
+    /// Keeps the current photo and its neighbours decoded at preview size and, while
+    /// zoomed, the current and next photos at full size.
+    fn update_large_requests(&mut self) {
+        let zoomed = self.zoom.is_some();
+        let key = (self.current, zoomed);
+        if self.large_requested_for == Some(key) {
             return;
         }
-        self.previews_requested_for = self.current;
+        self.large_requested_for = Some(key);
         let Some(cur) = self.current else {
             self.previews_wanted.clear();
             self.previews.clear();
+            self.fulls_wanted.clear();
+            self.fulls.clear();
             return;
         };
         let visible = self.visible();
         let pos = visible.iter().position(|&i| i == cur).unwrap_or(0);
-        let mut wanted = vec![cur];
-        for offset in [1isize, -1, 2] {
-            if let Some(&i) = visible.get(pos.wrapping_add_signed(offset)) {
-                wanted.push(i);
-            }
+        let neighbour = |offset: isize| visible.get(pos.wrapping_add_signed(offset)).copied();
+
+        let mut previews = vec![cur];
+        previews.extend([1, -1, 2].into_iter().filter_map(neighbour));
+        // A RAW-only photo has nothing larger than its embedded preview.
+        let fulls: Vec<usize> = if zoomed {
+            [Some(cur), neighbour(1)]
+                .into_iter()
+                .flatten()
+                .filter(|&i| self.photos[i].jpeg.is_some())
+                .collect()
+        } else {
+            Vec::new()
+        };
+        self.previews.retain(|i, _| previews.contains(i));
+        self.fulls.retain(|i, _| fulls.contains(i));
+
+        let full_size = Size::Full {
+            max_side: self.max_texture_side,
+        };
+        let mut order = Vec::new();
+        if fulls.contains(&cur) {
+            order.push((cur, full_size));
         }
-        self.previews.retain(|i, _| wanted.contains(i));
-        let jobs = wanted
-            .iter()
-            .filter(|i| !self.previews.contains_key(i) && !self.load_errors.contains_key(i))
-            .map(|&i| (i, self.photos[i].display_source().to_owned()))
+        order.extend(previews.iter().map(|&i| (i, Size::Preview)));
+        order.extend(fulls.iter().filter(|&&i| i != cur).map(|&i| (i, full_size)));
+
+        let requests = order
+            .into_iter()
+            .filter(|(i, size)| {
+                let cached = match size {
+                    Size::Full { .. } => self.fulls.contains_key(i),
+                    _ => self.previews.contains_key(i),
+                };
+                !cached && !self.load_errors.contains_key(i)
+            })
+            .map(|(index, size)| Request {
+                index,
+                path: self.photos[index].display_source().to_owned(),
+                size,
+            })
             .collect();
-        self.loader.set_previews(jobs);
-        self.previews_wanted = wanted;
+        self.loader.set_large(requests);
+        self.previews_wanted = previews;
+        self.fulls_wanted = fulls;
     }
 
     fn handle_keys(&mut self, ctx: &egui::Context) {
@@ -312,7 +383,8 @@ impl eframe::App for ShootingSortApp {
         if self.dialog.is_none() {
             self.handle_keys(&ctx);
         }
-        self.update_preview_requests();
+        self.max_texture_side = ctx.input(|i| i.max_texture_side) as u32;
+        self.update_large_requests();
 
         egui::Panel::top("top_bar")
             .frame(
@@ -651,37 +723,147 @@ impl ShootingSortApp {
 
         ui.add_space(14.0);
 
-        // The photo itself.
+        self.photo_view(ui, cur);
+    }
+
+    fn photo_view(&mut self, ui: &mut Ui, cur: usize) {
         let area = ui.available_rect_before_wrap();
-        ui.allocate_rect(area, Sense::hover());
+        let response = ui.allocate_rect(area, Sense::click_and_drag());
         let painter = ui.painter_at(area);
         painter.rect_filled(area, theme::RADIUS, theme::CHARCOAL);
 
-        let texture = self.previews.get(&cur).or_else(|| self.thumbs.get(&cur));
-        if let Some(texture) = texture {
-            let rect = theme::fit(texture.size_vec2(), area.shrink(1.0));
-            let corner = CornerRadius::same(theme::RADIUS - 2);
-            painter.add(
-                egui::epaint::RectShape::filled(rect, corner, Color32::WHITE)
-                    .with_texture(texture.id(), theme::FULL_UV),
-            );
-            if let Some(decision) = self.photos.get(cur).and_then(|p| p.decision) {
-                let keep = decision == Decision::Keep;
-                let color = if keep { theme::KEEP } else { theme::REMOVE };
-                painter.rect_stroke(rect, corner, Stroke::new(3.0, color), StrokeKind::Inside);
-                theme::paint_decision_badge(&painter, rect.right_top() + vec2(-26.0, 26.0), 14.0, keep);
+        let Some(base) = self.previews.get(&cur).or_else(|| self.thumbs.get(&cur)) else {
+            if let Some(error) = self.load_errors.get(&cur) {
+                painter.text(
+                    area.center(),
+                    Align2::CENTER_CENTER,
+                    format!("Could not show this photo: {error}"),
+                    FontId::new(14.0, FontFamily::Proportional),
+                    theme::TEXT_MUTED,
+                );
+            } else {
+                let spinner = Rect::from_center_size(area.center(), Vec2::splat(28.0));
+                ui.put(spinner, egui::Spinner::new().color(theme::TEXT_FAINT));
             }
-        } else if let Some(error) = self.load_errors.get(&cur) {
-            painter.text(
-                area.center(),
-                Align2::CENTER_CENTER,
-                format!("Could not show this photo: {error}"),
-                FontId::new(14.0, FontFamily::Proportional),
-                theme::TEXT_MUTED,
-            );
+            return;
+        };
+        // Texture handles are cheap reference-counted clones.
+        let base = base.clone();
+        let base_width = base.size_vec2().x;
+        let view = area.shrink(1.0);
+        let fit = theme::fit(base.size_vec2(), view);
+        let ppp = ui.ctx().pixels_per_point();
+        let original_width = self.original_sizes.get(&cur).map_or(base_width, |s| s[0] as f32);
+        // Zoom factor (relative to fit) that shows one photo pixel per screen pixel.
+        let actual_size = (original_width / (fit.width() * ppp)).max(1.0);
+
+        self.handle_zoom_input(ui, &response, fit, view, actual_size);
+
+        let mut rect = self.zoom.map_or(fit, |z| z.rect(fit, view));
+        // Align to screen pixels, so 100 % is sharp.
+        rect = rect.translate(((rect.min.to_vec2() * ppp).round() / ppp) - rect.min.to_vec2());
+
+        // Use the full-size image only where the preview has too few pixels.
+        let physical_width = rect.width() * ppp;
+        let full = self.fulls.get(&cur).filter(|_| physical_width > base_width);
+        let texture = full.unwrap_or(&base);
+        let zoomed = self.zoom.is_some();
+        let corner = if zoomed {
+            CornerRadius::ZERO
         } else {
-            let spinner = Rect::from_center_size(area.center(), Vec2::splat(28.0));
-            ui.put(spinner, egui::Spinner::new().color(theme::TEXT_FAINT));
+            CornerRadius::same(theme::RADIUS - 2)
+        };
+        painter.add(
+            egui::epaint::RectShape::filled(rect, corner, Color32::WHITE)
+                .with_texture(texture.id(), theme::FULL_UV),
+        );
+
+        let shown = rect.intersect(view);
+        if let Some(decision) = self.photos[cur].decision {
+            let keep = decision == Decision::Keep;
+            let color = if keep { theme::KEEP } else { theme::REMOVE };
+            painter.rect_stroke(shown, corner, Stroke::new(3.0, color), StrokeKind::Inside);
+            theme::paint_decision_badge(&painter, shown.right_top() + vec2(-26.0, 26.0), 14.0, keep);
+        }
+
+        if zoomed || response.hovered() {
+            let percent = (physical_width / original_width * 100.0).round();
+            let mut label = if zoomed {
+                format!("{percent} %")
+            } else {
+                format!("Fit · {percent} %")
+            };
+            let photo = &self.photos[cur];
+            if photo.jpeg.is_none() {
+                label.push_str(" · embedded RAW preview");
+            } else if zoomed && full.is_none() && physical_width > base_width {
+                label.push_str(" · loading full size…");
+            }
+            let font = FontId::new(12.0, FontFamily::Proportional);
+            let galley = painter.layout_no_wrap(label, font, theme::IVORY);
+            let pill = Rect::from_min_size(
+                pos2(view.left() + 12.0, view.bottom() - 12.0 - galley.size().y - 8.0),
+                galley.size() + vec2(16.0, 8.0),
+            );
+            painter.rect_filled(pill, 6.0, theme::CHARCOAL.gamma_multiply(0.8));
+            painter.galley(pill.min + vec2(8.0, 4.0), galley, theme::IVORY);
+        }
+    }
+
+    /// Double-click or `Z` toggles fit / 100 %. Pinch or ⌘-scroll zooms, `+` / `-` step,
+    /// `Esc` returns to fit. While zoomed, drag or scroll to pan.
+    fn handle_zoom_input(&mut self, ui: &Ui, response: &egui::Response, fit: Rect, view: Rect, actual_size: f32) {
+        let hover = response.hover_pos();
+        let anchor = hover.unwrap_or(view.center());
+        let max_factor = actual_size * MAX_ZOOM;
+        let factor = self.zoom.map_or(1.0, |z| z.factor);
+
+        let keys_active = self.dialog.is_none();
+        let (toggle_key, zoom_in, zoom_out, reset) = ui.input(|i| {
+            (
+                keys_active && i.key_pressed(Key::Z),
+                keys_active && (i.key_pressed(Key::Plus) || i.key_pressed(Key::Equals)),
+                keys_active && i.key_pressed(Key::Minus),
+                keys_active && i.key_pressed(Key::Escape),
+            )
+        });
+
+        let mut target = None;
+        if response.double_clicked() || toggle_key {
+            // A photo smaller than the view is already at 100 % when fitted: zoom 2× instead.
+            let actual = if actual_size > 1.01 { actual_size } else { 2.0 };
+            target = Some(if self.zoom.is_some() { 1.0 } else { actual });
+        } else if zoom_in {
+            target = Some(factor * ZOOM_STEP);
+        } else if zoom_out {
+            target = Some(factor / ZOOM_STEP);
+        } else if reset {
+            target = Some(1.0);
+        } else if hover.is_some() {
+            let pinch = ui.input(|i| i.zoom_delta());
+            if pinch != 1.0 {
+                target = Some(factor * pinch);
+            }
+        }
+        if let Some(target) = target {
+            self.zoom = zoom::zoom_to(self.zoom, target.min(max_factor), anchor, fit, view);
+        }
+
+        if let Some(zoom) = &mut self.zoom {
+            let mut delta = response.drag_delta();
+            if hover.is_some() {
+                delta += ui.input(|i| i.smooth_scroll_delta());
+            }
+            if delta != Vec2::ZERO {
+                zoom.pan(delta, fit, view);
+            }
+            if response.dragged() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+            } else if hover.is_some() {
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+            }
+        } else if hover.is_some() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
         }
     }
 

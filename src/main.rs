@@ -4,6 +4,7 @@ mod loader;
 mod session;
 mod sorter;
 mod theme;
+mod zoom;
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
