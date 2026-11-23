@@ -4,9 +4,10 @@
 mod app;
 mod library;
 mod loader;
+mod platform;
 mod session;
 mod sorter;
-mod theme;
+mod ui;
 mod zoom;
 
 fn main() -> eframe::Result {
@@ -30,7 +31,8 @@ fn main() -> eframe::Result {
 fn app_icon() -> eframe::egui::IconData {
     // Inside "Shooting Sort.app", an empty icon lets macOS use the sharper `icon.icns` of the bundle.
     if cfg!(target_os = "macos")
-        && std::env::current_exe().is_ok_and(|exe| exe.to_string_lossy().contains(".app/Contents/MacOS/"))
+        && std::env::current_exe()
+            .is_ok_and(|exe| exe.to_string_lossy().contains(".app/Contents/MacOS/"))
     {
         return eframe::egui::IconData::default();
     }

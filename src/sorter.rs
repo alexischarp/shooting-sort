@@ -83,7 +83,10 @@ mod tests {
 
     #[test]
     fn kept_photo_is_split_into_sorted_raw_and_jpeg() {
-        let dests = destinations(Path::new("/shoot"), &photo("A", true, true, Some(Decision::Keep)));
+        let dests = destinations(
+            Path::new("/shoot"),
+            &photo("A", true, true, Some(Decision::Keep)),
+        );
         assert_eq!(
             dests,
             vec![
@@ -95,7 +98,10 @@ mod tests {
 
     #[test]
     fn removed_photo_goes_to_to_remove() {
-        let dests = destinations(Path::new("/shoot"), &photo("B", true, true, Some(Decision::Remove)));
+        let dests = destinations(
+            Path::new("/shoot"),
+            &photo("B", true, true, Some(Decision::Remove)),
+        );
         assert_eq!(
             dests,
             vec![
@@ -112,7 +118,8 @@ mod tests {
 
     #[test]
     fn sort_moves_files_and_never_overwrites() {
-        let folder = std::env::temp_dir().join(format!("shooting-sort-test-{}", std::process::id()));
+        let folder =
+            std::env::temp_dir().join(format!("shooting-sort-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(folder.join("to-remove")).unwrap();
         for name in ["A.JPG", "A.ARW", "B.JPG", "B.ARW", "C.JPG"] {
@@ -131,7 +138,10 @@ mod tests {
         assert!(folder.join("sorted/jpeg/A.JPG").is_file());
         assert!(folder.join("sorted/raw/A.ARW").is_file());
         assert!(folder.join("to-remove/B.JPG").is_file());
-        assert_eq!(std::fs::read_to_string(folder.join("to-remove/B.ARW")).unwrap(), "existing");
+        assert_eq!(
+            std::fs::read_to_string(folder.join("to-remove/B.ARW")).unwrap(),
+            "existing"
+        );
         assert!(folder.join("B.ARW").is_file());
         assert!(folder.join("C.JPG").is_file());
         std::fs::remove_dir_all(&folder).unwrap();
@@ -139,7 +149,13 @@ mod tests {
 
     #[test]
     fn orphan_raw_is_sorted() {
-        let dests = destinations(Path::new("/shoot"), &photo("D", false, true, Some(Decision::Keep)));
-        assert_eq!(dests, vec![("/shoot/D.ARW".into(), "/shoot/sorted/raw/D.ARW".into())]);
+        let dests = destinations(
+            Path::new("/shoot"),
+            &photo("D", false, true, Some(Decision::Keep)),
+        );
+        assert_eq!(
+            dests,
+            vec![("/shoot/D.ARW".into(), "/shoot/sorted/raw/D.ARW".into())]
+        );
     }
 }

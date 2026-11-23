@@ -23,7 +23,9 @@ pub enum Size {
     Thumb,
     Preview,
     /// The full resolution, limited to `max_side` (the GPU's largest texture).
-    Full { max_side: u32 },
+    Full {
+        max_side: u32,
+    },
 }
 
 pub struct Request {
@@ -121,7 +123,10 @@ impl Loader {
         let generation = q.generation;
         q.large = wanted
             .into_iter()
-            .map(|request| Job { generation, request })
+            .map(|request| Job {
+                generation,
+                request,
+            })
             .collect();
         self.shared.wake.notify_all();
     }
@@ -170,7 +175,11 @@ fn decode(path: &Path, size: Size) -> Result<Images, String> {
     }?;
 
     let (w, h) = (image.width(), image.height());
-    let original_size = if swaps_sides(orientation) { [h, w] } else { [w, h] };
+    let original_size = if swaps_sides(orientation) {
+        [h, w]
+    } else {
+        [w, h]
+    };
 
     let (thumb, large) = match size {
         Size::Thumb => (shrink(image, THUMB_MAX), None),

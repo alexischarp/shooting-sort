@@ -1,0 +1,7 @@
+#!/bin/sh
+# Stops the push when the code is not formatted.
+# Enable once per clone with: git config core.hooksPath .githooks
+cargo fmt --check || {
+  echo "Code is not formatted. Run 'cargo fmt' and commit the changes."
+  exit 1
+}

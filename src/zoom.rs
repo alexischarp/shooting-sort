@@ -1,6 +1,15 @@
 //! Zoom and pan of the main photo.
 
-use eframe::egui::{Pos2, Rect, Vec2, vec2};
+use eframe::egui::{Pos2, Rect, Vec2, pos2, vec2};
+
+/// Texture coordinates of a whole image.
+pub const FULL_UV: Rect = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+
+/// Fits an image of `size` inside `bounds`, keeping its aspect ratio, centred.
+pub fn fit(size: Vec2, bounds: Rect) -> Rect {
+    let scale = (bounds.width() / size.x).min(bounds.height() / size.y);
+    Rect::from_center_size(bounds.center(), size * scale)
+}
 
 /// A zoomed view. "Fit to the view" is represented by no `Zoom` at all.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -44,12 +53,19 @@ impl Zoom {
 
 /// Zooms to `factor` (relative to fit), keeping the photo point under `anchor` in place.
 /// Returns `None` (fit) when `factor` is 1 or less.
-pub fn zoom_to(current: Option<Zoom>, factor: f32, anchor: Pos2, fit: Rect, view: Rect) -> Option<Zoom> {
+pub fn zoom_to(
+    current: Option<Zoom>,
+    factor: f32,
+    anchor: Pos2,
+    fit: Rect,
+    view: Rect,
+) -> Option<Zoom> {
     if factor <= 1.001 {
         return None;
     }
     let current_rect = current.map_or(fit, |z| z.rect(fit, view));
-    let point = ((anchor - current_rect.min) / current_rect.size()).clamp(Vec2::ZERO, Vec2::splat(1.0));
+    let point =
+        ((anchor - current_rect.min) / current_rect.size()).clamp(Vec2::ZERO, Vec2::splat(1.0));
     let size = fit.size() * factor;
     let min = anchor - point * size;
     let mut zoom = Zoom {
@@ -63,7 +79,6 @@ pub fn zoom_to(current: Option<Zoom>, factor: f32, anchor: Pos2, fit: Rect, view
 #[cfg(test)]
 mod tests {
     use super::*;
-    use eframe::egui::pos2;
 
     fn view() -> Rect {
         Rect::from_min_size(pos2(0.0, 0.0), vec2(300.0, 200.0))

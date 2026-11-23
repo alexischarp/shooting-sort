@@ -9,7 +9,8 @@ Rust, egui, eframe on wgpu. The app is in early development. It is tested on mac
 - Opens a shoot folder that contains RAW and JPEG files together.
 - Shows one photo for each RAW + JPEG pair with the same base name, for example `DSC04218.ARW` and `DSC04218.JPG`. The app shows the JPEG, because it loads faster.
 - Shows the formats of each photo: `RAW + JPEG`, `JPEG only` or `RAW only`. For a RAW-only photo, the app shows the preview that the camera embeds in the RAW file.
-- Marks each photo Keep or To Remove, with buttons or with the keyboard. Each marked photo shows a badge in the filmstrip.
+- Marks each photo Keep or To Remove, with buttons or with the keyboard. Each marked photo shows a badge in the filmstrip and in the gallery.
+- Shows the photos of the list in a gallery grid. You can mark the photos in the gallery too.
 - Zooms to 100 % to check the focus, and up to 400 %. The zoom stays when you go to the next photo, so you can compare the photos of a burst at the same place.
 - Filters the list: All Photos, Unsorted, Keep, To Remove. The sidebar shows the progress.
 - Saves the marks in the shoot folder. When you open the folder again, the app restores the marks and goes to the first unsorted photo.
@@ -89,9 +90,12 @@ The shortcuts are:
 | Key | Action |
 | --- | --- |
 | `←` / `→` | Previous / next photo |
+| `↑` / `↓` | Photo in the row above / below, in the gallery |
 | `K` | Keep |
 | `X` | To Remove |
 | `U` | Clear the mark |
+| `G` | Gallery, or back to the photo |
+| `Enter` | Open the selected photo, in the gallery |
 | `Z` | Zoom to 100 %, or back to fit |
 | `+` / `-` | Zoom in / out |
 | `Esc` | Back to fit |
@@ -106,6 +110,8 @@ To zoom with the mouse or the trackpad:
 - When the photo is zoomed, drag it or scroll to move it.
 
 The label at the bottom left of the photo shows the zoom level.
+
+To see the photos as a grid, click "Gallery" (`G`). The arrows select a photo, and `K`, `X` and `U` mark it. Click a photo or press `Enter` to open it.
 
 ## How it works
 
@@ -128,7 +134,7 @@ If a file with the same name is already at the destination, the app does not mov
 
 The marks are in `.shooting-sort.json`, in the shoot folder. The app writes this file after each mark and deletes it when no marks are left.
 
-A pool of background threads decodes the images. The photo on screen and the photos next to it have priority. Filmstrip thumbnails load when they come into view.
+A pool of background threads decodes the images. The photo on screen and the photos next to it have priority. The thumbnails of the filmstrip and the gallery load when they come into view.
 
 The main view shows a preview of 2560 pixels at most. When you zoom, the app also decodes the full-size JPEG of the current photo and of the next photo. It shows the full-size image only when the preview does not have sufficient pixels for the zoom level.
 
@@ -140,9 +146,14 @@ The code is in `src/`:
 | `session.rs` | Read and write `.shooting-sort.json` |
 | `sorter.rs` | File moves |
 | `loader.rs` | Background image decoding |
-| `zoom.rs` | Zoom and pan calculations |
-| `theme.rs` | Colours, logo and icons |
-| `app.rs` | User interface |
+| `zoom.rs` | Zoom, pan and fit calculations |
+| `platform.rs` | File names and opening a folder in the file manager |
+| `ui/` | Colours, logo, icons and widgets, independent of the app state |
+| `app.rs` | App state, actions and window layout |
+| `app/culling.rs` | Photo list: filter, current photo, navigation and decisions |
+| `app/images.rs` | Textures of the thumbnails, previews and full-size images |
+| `app/input.rs` | Keyboard, drag-and-drop and zoom gestures |
+| `app/views/` | Panels and dialogs of the window |
 
 The app icon is `assets/icon.svg`. The files `assets/icon.icns` (macOS bundle), `assets/icon.png` and `assets/icon-128.rgba` (window icon on Windows and Linux) come from it. The macOS bundle files are in `packaging/macos/`.
 
@@ -167,6 +178,20 @@ Run the linter:
 ```bash
 cargo clippy
 ```
+
+Format the code:
+
+```bash
+cargo fmt
+```
+
+Enable the pre-push hook once per clone. It stops the push when the code is not formatted:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The workflow `.github/workflows/check.yml` checks the formatting, runs `cargo clippy` and the unit tests on every push to `main` and on every pull request.
 
 ## Release
 
@@ -199,7 +224,7 @@ packaging/macos/bundle.sh target/release/shooting-sort 0.1.0 dist
 
 Issues and pull requests are welcome.
 
-- Run the unit tests and `cargo clippy`. Test the app with a real shoot folder when you modify the scan, the loader, the zoom or the sort.
+- Run `cargo fmt`, the unit tests and `cargo clippy`. Test the app with a real shoot folder when you modify the scan, the loader, the zoom or the sort.
 - Write commit messages in the Conventional Commits format (`feat:`, `fix:`, `docs:`).
 - Reports about RAW formats that do not show a preview are welcome. Give the camera model and the file extension.
 
